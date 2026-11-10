@@ -1,101 +1,68 @@
-# from machine import Pin, I2C
-# import ssd1306
-# #include <Wire.h> //Inclusão da biblioteca wire
-# #include <Adafruit_SSD1306.h> //Inclusão da biblioteca Adafruit_SSD1306.h
-
-
-# # ESP32 Pin assignment
- 
-# # CÓDIGO QUE VEIO JUNTO, ONDE MOSTRA JOGO ESMAGA RATA
-# #i2c = I2C(0, scl=Pin(22), sda=Pin(21))
-
-# # oled_width = 128
-# # oled_height = 64
-# # oled = ssd1306.SSD1306_I2C(oled_width, oled_height, i2c)
-
-# # oled.text('Jogo esmaga ratai!', 10, 10)      
-# # oled.show()
-
-from machine import Pin, I2C, PWM
+from machine import Pin, I2C
 import ssd1306
 import time
-from time import sleep
+import random
 
-# Pinos do ESP32 conectados aos canais do LED RGB
-# Ajuste conforme as conexões da sua protoboard
-vermelho = PWM(Pin(19), freq=1000, duty=0)
-verde = PWM(Pin(18), freq=1000, duty=0)
-azul = PWM(Pin(17), freq=1000, duty=0)
-
-# Configuração do I2C no ESP32
 i2c = I2C(0, scl=Pin(22), sda=Pin(21))
-
-# Configuração botões
-
-
-# Inicialização do display OLED 128x64
 displayLED = ssd1306.SSD1306_I2C(128, 64, i2c)
 
-#definição da cor
-def definir_cor(r, g, b):
-    # Valores de 0 a 255 convertidos para 0 a 1023
-    led_r.duty(r * 1023 // 255)
-    led_g.duty(g * 1023 // 255)
-    led_b.duty(b * 1023 // 255)
+leds = [
+    Pin(33, Pin.OUT),
+    Pin(25, Pin.OUT),
+    Pin(26, Pin.OUT),
+    Pin(27, Pin.OUT)
+]
+buttons = [
+    Pin(5, Pin.IN, Pin.PULL_DOWN),
+    Pin(4, Pin.IN, Pin.PULL_DOWN),
+    Pin(2, Pin.IN, Pin.PULL_DOWN),
+    Pin(12, Pin.IN, Pin.PULL_DOWN)
+]
 
+pontos = 0
+led_atual = -1
+ultimo_clique = 0
 
+def atualizar_display(mensagem="ESMAGA RATA!"):
+    displayLED.fill(0)
+    displayLED.text(mensagem, 10, 15, 1)
+    displayLED.text("Pontos: {}".format(pontos), 10, 40, 1)
+    displayLED.show()
+
+def trata_botao(pin):
+    global pontos, led_atual, ultimo_clique
+    
+    agora = time.ticks_ms()
+    if time.ticks_diff(agora, ultimo_clique) < 200:
+        return
+    ultimo_clique = agora
+
+    for index, btn in enumerate(buttons):
+        if btn == pin:
+            if leds[index].value() == 1:
+                pontos += 1
+                leds[index].value(0)
+                atualizar_display("ACERTOU!")
+            break
+
+for btn in buttons:
+    btn.irq(trigger=Pin.IRQ_RISING, handler=trata_botao)
+
+for led in leds:
+    led.value(0)
+
+atualizar_display("Iniciando...")
+time.sleep(2)
 
 while True:
-    vermelho.duty(1023)
-    verde.duty(0)
-    azul.duty(0)
-    sleep(1)
-
-    vermelho.duty(0)
-    verde.duty(1023)
-    azul.duty(0)
-    sleep(1)
-
-    vermelho.duty(0)
-    verde.duty(0)
-    azul.duty(1023)
-    sleep(1)
+    led_atual = random.randint(0, 3)
+    print("Acendendo LED no pino:", led_atual)
     
-    # Primeira mensagem
-    displayLED.fill(0)
-    displayLED.text("Markinhos", 10, 12, 1)
-    displayLED.show()
-
-    time.sleep(1.5)
-
-    # Segunda mensagem
-    displayLED.fill(0)
-    displayLED.text("Daneu", 10, 12, 1)
-    displayLED.show()
-
-    time.sleep(1.5)
-
-    # Terceira mensagem
-    displayLED.fill(0)
-    displayLED.text("Soph", 10, 12, 1)
-    displayLED.show()
-
-    time.sleep(1.5)
-
-    # Quarta mensagem
-    displayLED.fill(0)
-    displayLED.text("ErikAH", 10, 12, 1)
-    displayLED.show()
-
-    time.sleep(1.5)
-
-    # Quinta mensagem
-    displayLED.fill(0)
-    displayLED.text("Gigi", 10, 12, 1)
-    displayLED.show()
-
-    time.sleep(1.5)
-
-    # Limpa o display
-    displayLED.fill(0)
-    displayLED.show()
+    leds[led_atual].value(1)
+    atualizar_display("APERTE!")
+    
+    time.sleep(0.8)
+    
+    leds[led_atual].value(0)
+    
+    time.sleep(1.0)
