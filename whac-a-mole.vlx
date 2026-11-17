@@ -1,0 +1,1722 @@
+{
+ "format": "velxio-project",
+ "version": 1,
+ "exportedAt": "2026-11-17T13:42:56.734Z",
+ "boards": [
+  {
+   "id": "esp32-devkit-c-v4",
+   "boardKind": "esp32-devkit-c-v4",
+   "x": -300,
+   "y": 290,
+   "activeFileGroupId": "group-esp32-devkit-c-v4",
+   "languageMode": "micropython",
+   "serialBaudRate": 0
+  },
+  {
+   "id": "esp32-devkit-c-v4-2",
+   "boardKind": "esp32-devkit-c-v4",
+   "x": 430,
+   "y": 290,
+   "activeFileGroupId": "group-esp32-devkit-c-v4-2",
+   "languageMode": "micropython",
+   "serialBaudRate": 0
+  }
+ ],
+ "fileGroups": {
+  "group-esp32-devkit-c-v4": [
+   {
+    "name": "main.py",
+    "content": "from machine import Pin\nimport radio\nimport tela\nimport time\nimport random\n\nleds = [Pin(12, Pin.OUT), Pin(27, Pin.OUT), Pin(25, Pin.OUT)]\nbuttons = [Pin(13, Pin.IN, Pin.PULL_UP), Pin(14, Pin.IN, Pin.PULL_UP), Pin(26, Pin.IN, Pin.PULL_UP)]\n\n# pontuação máxima\nPONTOS_PARA_VENCER = 10\n# número que avisa o controle 2 que nenhum LED está aceso\nAPAGADO = 255\n\npontos = [0, 0]\nled_atual = -1\nled_aceso = APAGADO\nled_enviado = -1\nultimo_envio = 0\nultimo_clique = [0, 0]\nacertou = 0\nesmagou = 0\napertou = False\n\ndef atualizar_display(mensagem=\"ESMAGA RATA!\"):\n    tela.atualizar_display(mensagem, pontos, led_aceso, led_atual, esmagou)\n\ndef acender_leds(index):\n    global led_aceso\n\n    leds[index].value(1)\n    led_aceso = index\n\ndef apagar_leds():\n    global led_aceso\n\n    for led in leds:\n        led.value(0)\n    led_aceso = APAGADO\n\ndef enviar_led():\n    global led_enviado, ultimo_envio\n\n    # avisa o controle 2 quando o LED muda e repete a cada 300 ms\n    if led_enviado != led_aceso or time.ticks_diff(time.ticks_ms(), ultimo_envio) >= 300:\n        led_enviado = led_aceso\n        ultimo_envio = time.ticks_ms()\n        radio.enviar(led_aceso)\n\ndef clique(jogador, index):\n    global acertou, esmagou, apertou\n\n    # ignora o mesmo botão apertado duas vezes em menos de 200 ms\n    agora = time.ticks_ms()\n    if time.ticks_diff(agora, ultimo_clique[jogador]) < 200:\n        return\n    ultimo_clique[jogador] = agora\n    apertou = True\n\n    if index == led_aceso:\n        pontos[jogador] += 1\n        apagar_leds()\n        acertou = jogador + 1\n        esmagou = jogador + 1\n\ndef trata_botao(pin):\n    for index, btn in enumerate(buttons):\n        if btn == pin:\n            clique(0, index)\n            return\n\ndef esperar(ms):\n    global acertou\n\n    fim = time.ticks_add(time.ticks_ms(), ms)\n    while time.ticks_diff(fim, time.ticks_ms()) > 0:\n        # botão que o jogador 2 apertou\n        index = radio.receber()\n        if index is not None:\n            clique(1, index)\n        enviar_led()\n\n        if acertou:\n            atualizar_display(\"J{} ACERTOU!\".format(acertou))\n            acertou = 0\n        time.sleep_ms(10)\n\ndef jogar():\n    global led_atual, acertou, esmagou\n\n    pontos[0] = 0\n    pontos[1] = 0\n    acertou = 0\n    esmagou = 0\n\n    for numero in (\"3\", \"2\", \"1\"):\n        tela.mostrar_numero(\"PREPARAR...\", numero)\n        esperar(1000)\n\n    while max(pontos) < PONTOS_PARA_VENCER:\n        # a toupeira nunca sai no mesmo buraco duas vezes seguidas\n        led_anterior = led_atual\n        while led_atual == led_anterior:\n            led_atual = random.randint(0, 2)\n        print(\"Acendendo LED no pino:\", led_atual)\n\n        esmagou = 0\n        acender_leds(led_atual)\n        atualizar_display(\"APERTE!\")\n\n        # o tempo da toupeira diminui a cada ponto\n        esperar(max(800, 1500 - max(pontos) * 80))\n\n        apagar_leds()\n        atualizar_display(\"J{} ACERTOU!\".format(esmagou) if esmagou else \"ESMAGA RATA!\")\n\n        esperar(max(500, 800 - max(pontos) * 30))\n\n    vencedor = 1 if pontos[0] > pontos[1] else 2\n    esmagou = 0\n    atualizar_display(\"J{} VENCEU!\".format(vencedor))\n\nfor btn in buttons:\n    btn.irq(trigger=Pin.IRQ_FALLING, handler=trata_botao)\n\napagar_leds()\ntela.desenhar_titulo(\"CONECTANDO...\")\nradio.conectar(b\"led\", b\"botao\")\n\nwhile True:\n    jogar()\n    esperar(3000)\n\n    apertou = False\n    while not apertou:\n        esperar(50)\n"
+   },
+   {
+    "name": "tela.py",
+    "content": "from machine import Pin, SPI\nimport ili9341\nimport framebuf\nimport gc\n\nspi = SPI(2, baudrate=40000000, sck=Pin(18), mosi=Pin(23), miso=Pin(19))\ndisplay = ili9341.ILI9341(spi, cs=Pin(5, Pin.OUT), dc=Pin(2, Pin.OUT), rst=Pin(4, Pin.OUT))\n\nVAZIO = 0\nTOUPEIRA = 1\nESMAGADA = 2\n\n# converte a cor para o formato que a tela entende\ndef cor(r, g, b):\n    c = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)\n    return ((c & 0xFF) << 8) | (c >> 8)\n\nPRETO = cor(0, 0, 0)\nBRANCO = cor(255, 255, 255)\nAMARELO = cor(255, 214, 0)\nFUNDO_TITULO = cor(30, 30, 46)\nGRAMA = cor(76, 160, 60)\nGRAMA_ESCURA = cor(52, 120, 44)\nTERRA = cor(50, 30, 18)\nPELO = cor(140, 92, 50)\nPELO_ESCURO = cor(104, 66, 34)\nFOCINHO = cor(240, 150, 160)\nCORES_BOTOES = [cor(230, 40, 40), cor(40, 190, 70), cor(250, 210, 30)]\n\n# desenho de um buraco de 64 x 64, reaproveitado em todos\npixels_buraco = bytearray(64 * 64 * 2)\nburaco = framebuf.FrameBuffer(pixels_buraco, 64, 64, framebuf.RGB565)\n\n# guarda o que já está na tela para não desenhar de novo\ncampo_desenhado = False\ntitulo_desenhado = None\npontos_desenhados = [None, None]\nburacos_desenhados = [[None] * 3, [None] * 3]\n\n# escreve o texto ampliado, com o centro em centro_x\ndef texto_grande(texto, centro_x, y, escala, cor_texto, cor_fundo):\n    largura = len(texto) * 8\n    letras = framebuf.FrameBuffer(bytearray(largura), largura, 8, framebuf.MONO_VLSB)\n    letras.text(texto, 0, 0, 1)\n    pixels = bytearray(largura * escala * 8 * escala * 2)\n    quadro = framebuf.FrameBuffer(pixels, largura * escala, 8 * escala, framebuf.RGB565)\n    quadro.fill(cor_fundo)\n    for coluna in range(largura):\n        for linha in range(8):\n            if letras.pixel(coluna, linha):\n                quadro.fill_rect(coluna * escala, linha * escala, escala, escala, cor_texto)\n    display.desenhar(centro_x - largura * escala // 2, y, largura * escala, 8 * escala, pixels)\n    gc.collect()\n\ndef elipse(centro_x, centro_y, raio_x, raio_y, cor_forma):\n    for linha in range(-raio_y, raio_y + 1):\n        metade = int(raio_x * (1 - (linha * linha) / (raio_y * raio_y)) ** 0.5)\n        buraco.hline(centro_x - metade, centro_y + linha, 2 * metade + 1, cor_forma)\n\n# orelhas, corpo, olhos, focinho e dentes\ndef desenhar_toupeira():\n    elipse(17, 16, 5, 5, PELO_ESCURO)\n    elipse(47, 16, 5, 5, PELO_ESCURO)\n    elipse(32, 30, 17, 18, PELO)\n    buraco.fill_rect(15, 30, 35, 21, PELO)\n    elipse(25, 26, 4, 4, BRANCO)\n    elipse(39, 26, 4, 4, BRANCO)\n    elipse(26, 27, 2, 2, PRETO)\n    elipse(38, 27, 2, 2, PRETO)\n    elipse(32, 35, 5, 3, FOCINHO)\n    buraco.fill_rect(29, 39, 3, 5, BRANCO)\n    buraco.fill_rect(33, 39, 3, 5, BRANCO)\n\n# toupeira achatada com olhos em X e estrelas\ndef desenhar_esmagada():\n    elipse(32, 46, 22, 8, PELO)\n    for x in (22, 36):\n        buraco.line(x, 42, x + 6, 48, PRETO)\n        buraco.line(x + 6, 42, x, 48, PRETO)\n    for x, y in ((12, 22), (32, 12), (52, 22)):\n        buraco.hline(x - 5, y, 11, AMARELO)\n        buraco.vline(x, y - 5, 11, AMARELO)\n        buraco.line(x - 3, y - 3, x + 3, y + 3, AMARELO)\n        buraco.line(x - 3, y + 3, x + 3, y - 3, AMARELO)\n\ndef desenhar_buraco(jogador, index, tipo):\n    # só redesenha o buraco que mudou\n    if buracos_desenhados[jogador][index] == tipo:\n        return\n    buracos_desenhados[jogador][index] = tipo\n\n    buraco.fill(GRAMA)\n    elipse(32, 50, 27, 11, GRAMA_ESCURA)\n    elipse(32, 50, 24, 9, TERRA)\n    if tipo == TOUPEIRA:\n        desenhar_toupeira()\n    elif tipo == ESMAGADA:\n        desenhar_esmagada()\n    display.desenhar(80 + index * 80, 56 + jogador * 106, 64, 64, pixels_buraco)\n\ndef desenhar_titulo(mensagem):\n    global titulo_desenhado\n\n    if titulo_desenhado == mensagem:\n        return\n    titulo_desenhado = mensagem\n    display.preencher(0, 0, 320, 28, FUNDO_TITULO)\n    texto_grande(mensagem, 160, 6, 2, BRANCO, FUNDO_TITULO)\n\n# grama, placar dos dois jogadores e faixas com a cor de cada botão\ndef desenhar_campo():\n    global campo_desenhado\n\n    campo_desenhado = True\n    display.preencher(0, 28, 320, 212, GRAMA)\n    for jogador in range(2):\n        y = 30 + jogador * 106\n        display.preencher(0, y, 64, 100, GRAMA_ESCURA)\n        texto_grande(\"J{}\".format(jogador + 1), 32, y + 16, 2, AMARELO, GRAMA_ESCURA)\n        pontos_desenhados[jogador] = None\n        for index in range(3):\n            display.preencher(88 + index * 80, y + 8, 48, 10, CORES_BOTOES[index])\n            buracos_desenhados[jogador][index] = None\n\ndef atualizar_display(mensagem, pontos, toupeira, esmagada, esmagou):\n    if not campo_desenhado:\n        desenhar_campo()\n    desenhar_titulo(mensagem)\n\n    for jogador in range(2):\n        if pontos_desenhados[jogador] != pontos[jogador]:\n            pontos_desenhados[jogador] = pontos[jogador]\n            display.preencher(0, 74 + jogador * 106, 64, 24, GRAMA_ESCURA)\n            texto_grande(str(pontos[jogador]), 32, 74 + jogador * 106, 3, BRANCO, GRAMA_ESCURA)\n\n        for index in range(3):\n            tipo = VAZIO\n            if index == toupeira:\n                tipo = TOUPEIRA\n            elif index == esmagada and esmagou == jogador + 1:\n                tipo = ESMAGADA\n            desenhar_buraco(jogador, index, tipo)\n\n# contagem antes do jogo começar\ndef mostrar_numero(mensagem, numero):\n    global campo_desenhado\n\n    campo_desenhado = False\n    desenhar_titulo(mensagem)\n    display.preencher(0, 28, 320, 212, GRAMA)\n    texto_grande(numero, 160, 94, 10, BRANCO, GRAMA)\n"
+   },
+   {
+    "name": "radio.py",
+    "content": "import network\nimport time\n\n# True no Velxio (WiFi + MQTT), False nas placas de verdade (ESP-NOW)\nSIMULADOR = True\n\n# nome que separa o nosso jogo dos outros no servidor MQTT\nSALA = b\"whac-a-mole-7f3k9q\"\n# endereço do ESP-NOW que fala com qualquer placa por perto\nTODOS = bytes([255] * 6)\n\nconexao = None\ntopico = None\nrecebidas = []\n\n# o MQTT chama esta função quando chega uma mensagem\ndef chegou(origem, mensagem):\n    recebidas.append(bytes(mensagem))\n\n# envia e recebe são os assuntos de cada controle: led ou botao\ndef conectar(envia, recebe):\n    global conexao, topico\n\n    wifi = network.WLAN(network.STA_IF)\n    wifi.active(True)\n\n    if SIMULADOR:\n        from umqtt.simple import MQTTClient\n\n        wifi.connect(\"Velxio-GUEST\", \"\")\n        while not wifi.isconnected():\n            time.sleep_ms(200)\n\n        topico = SALA + b\"/\" + envia\n        conexao = MQTTClient(SALA + b\"-\" + envia, \"broker.hivemq.com\")\n        conexao.set_callback(chegou)\n        conexao.connect()\n        conexao.sock.setsockopt(6, 1, 1)\n        conexao.subscribe(SALA + b\"/\" + recebe)\n    else:\n        import espnow\n\n        conexao = espnow.ESPNow()\n        conexao.active(True)\n        conexao.add_peer(TODOS)\n\n# manda um número só: o LED aceso ou o botão apertado\ndef enviar(numero):\n    try:\n        if SIMULADOR:\n            conexao.publish(topico, bytes([numero]))\n        else:\n            conexao.send(TODOS, bytes([numero]), False)\n    except OSError:\n        pass\n\n# devolve o número que chegou, ou None se não chegou nada\ndef receber():\n    try:\n        if SIMULADOR:\n            conexao.check_msg()\n        else:\n            origem, mensagem = conexao.recv(0)\n            if mensagem:\n                recebidas.append(mensagem)\n    except OSError:\n        pass\n\n    if recebidas:\n        return recebidas.pop(0)[0]\n    return None\n"
+   },
+   {
+    "name": "ili9341.py",
+    "content": "import struct\nimport time\n\n\nclass ILI9341:\n    def __init__(self, spi, cs, dc, rst, rotacao=0x28, largura=320, altura=240):\n        self.spi = spi\n        self.cs = cs\n        self.dc = dc\n        self.rst = rst\n        self.rotacao = rotacao\n        self.largura = largura\n        self.altura = altura\n        self.cs.value(1)\n        self.iniciar()\n\n    def comando(self, codigo, dados=None):\n        self.cs.value(0)\n        self.dc.value(0)\n        self.spi.write(bytes([codigo]))\n        if dados:\n            self.dc.value(1)\n            self.spi.write(dados)\n        self.cs.value(1)\n\n    def iniciar(self):\n        self.rst.value(0)\n        time.sleep_ms(50)\n        self.rst.value(1)\n        time.sleep_ms(150)\n        self.comando(0x01)\n        time.sleep_ms(150)\n        self.comando(0x11)\n        time.sleep_ms(150)\n        self.comando(0x3A, bytes([0x55]))\n        self.comando(0x36, bytes([self.rotacao]))\n        self.comando(0x29)\n\n    def janela(self, x, y, largura, altura):\n        self.comando(0x2A, struct.pack(\">HH\", x, x + largura - 1))\n        self.comando(0x2B, struct.pack(\">HH\", y, y + altura - 1))\n\n    def desenhar(self, x, y, largura, altura, pixels):\n        self.janela(x, y, largura, altura)\n        self.comando(0x2C, pixels)\n\n    def preencher(self, x, y, largura, altura, cor):\n        self.janela(x, y, largura, altura)\n        total = largura * altura\n        bloco = struct.pack(\"<H\", cor) * min(total, 256)\n        self.cs.value(0)\n        self.dc.value(0)\n        self.spi.write(bytes([0x2C]))\n        self.dc.value(1)\n        while total > 0:\n            parte = min(total, 256)\n            self.spi.write(bloco if parte == 256 else bloco[: parte * 2])\n            total -= parte\n        self.cs.value(1)\n"
+   }
+  ],
+  "group-esp32-devkit-c-v4-2": [
+   {
+    "name": "main.py",
+    "content": "from machine import Pin\nimport radio\nimport time\n\nleds = [Pin(19, Pin.OUT), Pin(17, Pin.OUT), Pin(16, Pin.OUT)]\nbuttons = [Pin(18, Pin.IN, Pin.PULL_UP), Pin(5, Pin.IN, Pin.PULL_UP), Pin(4, Pin.IN, Pin.PULL_UP)]\n\nbotao_apertado = -1\nultimo_clique = 0\n\ndef acender_led(index):\n    for posicao, led in enumerate(leds):\n        led.value(1 if posicao == index else 0)\n\ndef trata_botao(pin):\n    global botao_apertado, ultimo_clique\n\n    for index, btn in enumerate(buttons):\n        if btn == pin:\n            agora = time.ticks_ms()\n            if time.ticks_diff(agora, ultimo_clique) < 200:\n                return\n            ultimo_clique = agora\n            botao_apertado = index\n            return\n\nfor btn in buttons:\n    btn.irq(trigger=Pin.IRQ_FALLING, handler=trata_botao)\n\nacender_led(-1)\nradio.conectar(b\"botao\", b\"led\")\n\n# o controle 2 só manda o botão apertado e acende o LED que o controle 1 pedir\nwhile True:\n    if botao_apertado >= 0:\n        radio.enviar(botao_apertado)\n        botao_apertado = -1\n\n    index = radio.receber()\n    if index is not None:\n        acender_led(index)\n    time.sleep_ms(5)\n"
+   },
+   {
+    "name": "radio.py",
+    "content": "import network\nimport time\n\n# True no Velxio (WiFi + MQTT), False nas placas de verdade (ESP-NOW)\nSIMULADOR = True\n\n# nome que separa o nosso jogo dos outros no servidor MQTT\nSALA = b\"whac-a-mole-7f3k9q\"\n# endereço do ESP-NOW que fala com qualquer placa por perto\nTODOS = bytes([255] * 6)\n\nconexao = None\ntopico = None\nrecebidas = []\n\n# o MQTT chama esta função quando chega uma mensagem\ndef chegou(origem, mensagem):\n    recebidas.append(bytes(mensagem))\n\n# envia e recebe são os assuntos de cada controle: led ou botao\ndef conectar(envia, recebe):\n    global conexao, topico\n\n    wifi = network.WLAN(network.STA_IF)\n    wifi.active(True)\n\n    if SIMULADOR:\n        from umqtt.simple import MQTTClient\n\n        wifi.connect(\"Velxio-GUEST\", \"\")\n        while not wifi.isconnected():\n            time.sleep_ms(200)\n\n        topico = SALA + b\"/\" + envia\n        conexao = MQTTClient(SALA + b\"-\" + envia, \"broker.hivemq.com\")\n        conexao.set_callback(chegou)\n        conexao.connect()\n        conexao.sock.setsockopt(6, 1, 1)\n        conexao.subscribe(SALA + b\"/\" + recebe)\n    else:\n        import espnow\n\n        conexao = espnow.ESPNow()\n        conexao.active(True)\n        conexao.add_peer(TODOS)\n\n# manda um número só: o LED aceso ou o botão apertado\ndef enviar(numero):\n    try:\n        if SIMULADOR:\n            conexao.publish(topico, bytes([numero]))\n        else:\n            conexao.send(TODOS, bytes([numero]), False)\n    except OSError:\n        pass\n\n# devolve o número que chegou, ou None se não chegou nada\ndef receber():\n    try:\n        if SIMULADOR:\n            conexao.check_msg()\n        else:\n            origem, mensagem = conexao.recv(0)\n            if mensagem:\n                recebidas.append(mensagem)\n    except OSError:\n        pass\n\n    if recebidas:\n        return recebidas.pop(0)[0]\n    return None\n"
+   }
+  ]
+ },
+ "components": [
+  {
+   "id": "bb1",
+   "metadataId": "breadboard",
+   "x": -370,
+   "y": 0,
+   "properties": {}
+  },
+  {
+   "id": "led10",
+   "metadataId": "led",
+   "x": -322.64,
+   "y": 15.600000000000009,
+   "properties": {
+    "color": "red"
+   }
+  },
+  {
+   "id": "r10",
+   "metadataId": "resistor",
+   "x": -373.28999999999996,
+   "y": 120.30000000000001,
+   "properties": {
+    "value": "220",
+    "rotation": 90
+   }
+  },
+  {
+   "id": "led11",
+   "metadataId": "led",
+   "x": -255.44,
+   "y": 15.600000000000009,
+   "properties": {
+    "color": "green"
+   }
+  },
+  {
+   "id": "r11",
+   "metadataId": "resistor",
+   "x": -306.09,
+   "y": 120.30000000000001,
+   "properties": {
+    "value": "220",
+    "rotation": 90
+   }
+  },
+  {
+   "id": "led12",
+   "metadataId": "led",
+   "x": -188.24,
+   "y": 15.600000000000009,
+   "properties": {
+    "color": "yellow"
+   }
+  },
+  {
+   "id": "r12",
+   "metadataId": "resistor",
+   "x": -238.89,
+   "y": 120.30000000000001,
+   "properties": {
+    "value": "220",
+    "rotation": 90
+   }
+  },
+  {
+   "id": "lcd1",
+   "metadataId": "ili9341",
+   "x": 7,
+   "y": 225,
+   "properties": {
+    "rotation": 90
+   }
+  },
+  {
+   "id": "bb2",
+   "metadataId": "breadboard",
+   "x": 350,
+   "y": 0,
+   "properties": {}
+  },
+  {
+   "id": "led20",
+   "metadataId": "led",
+   "x": 368.56,
+   "y": 15.600000000000009,
+   "properties": {
+    "color": "red"
+   }
+  },
+  {
+   "id": "r20",
+   "metadataId": "resistor",
+   "x": 317.91,
+   "y": 120.30000000000001,
+   "properties": {
+    "value": "220",
+    "rotation": 90
+   }
+  },
+  {
+   "id": "led21",
+   "metadataId": "led",
+   "x": 435.76,
+   "y": 15.600000000000009,
+   "properties": {
+    "color": "green"
+   }
+  },
+  {
+   "id": "r21",
+   "metadataId": "resistor",
+   "x": 385.11,
+   "y": 120.30000000000001,
+   "properties": {
+    "value": "220",
+    "rotation": 90
+   }
+  },
+  {
+   "id": "led22",
+   "metadataId": "led",
+   "x": 502.96,
+   "y": 15.600000000000009,
+   "properties": {
+    "color": "yellow"
+   }
+  },
+  {
+   "id": "r22",
+   "metadataId": "resistor",
+   "x": 452.31,
+   "y": 120.30000000000001,
+   "properties": {
+    "value": "220",
+    "rotation": 90
+   }
+  },
+  {
+   "id": "btn10",
+   "metadataId": "pushbutton-6mm",
+   "x": -394.54,
+   "y": 111.3,
+   "properties": {
+    "color": "red",
+    "rotation": 90,
+    "key": "a"
+   }
+  },
+  {
+   "id": "btn11",
+   "metadataId": "pushbutton-6mm",
+   "x": -327.34000000000003,
+   "y": 111.3,
+   "properties": {
+    "color": "green",
+    "rotation": 90,
+    "key": "s"
+   }
+  },
+  {
+   "id": "btn12",
+   "metadataId": "pushbutton-6mm",
+   "x": -260.14,
+   "y": 111.3,
+   "properties": {
+    "color": "yellow",
+    "rotation": 90,
+    "key": "d"
+   }
+  },
+  {
+   "id": "btn20",
+   "metadataId": "pushbutton-6mm",
+   "x": 344.65999999999997,
+   "y": 111.3,
+   "properties": {
+    "color": "red",
+    "rotation": 90,
+    "key": "ArrowLeft"
+   }
+  },
+  {
+   "id": "btn21",
+   "metadataId": "pushbutton-6mm",
+   "x": 411.86,
+   "y": 111.3,
+   "properties": {
+    "color": "green",
+    "rotation": 90,
+    "key": "ArrowDown"
+   }
+  },
+  {
+   "id": "btn22",
+   "metadataId": "pushbutton-6mm",
+   "x": 479.05999999999995,
+   "y": 111.3,
+   "properties": {
+    "color": "yellow",
+    "rotation": 90,
+    "key": "ArrowRight"
+   }
+  }
+ ],
+ "wires": [
+  {
+   "waypoints": [],
+   "id": "wire-0-1794922972000",
+   "start": {
+    "componentId": "btn10",
+    "pinName": "2.l",
+    "x": -330.04,
+    "y": 92.8
+   },
+   "end": {
+    "componentId": "bb1",
+    "pinName": "3t.e",
+    "x": -330.24,
+    "y": 92.39999999999999
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-1-1794922972000",
+   "start": {
+    "componentId": "btn10",
+    "pinName": "1.l",
+    "x": -311.24,
+    "y": 92.8
+   },
+   "end": {
+    "componentId": "bb1",
+    "pinName": "5t.e",
+    "x": -311.04,
+    "y": 92.39999999999999
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-2-1794922972000",
+   "start": {
+    "componentId": "btn10",
+    "pinName": "2.r",
+    "x": -330.04,
+    "y": 120.8
+   },
+   "end": {
+    "componentId": "bb1",
+    "pinName": "3b.f",
+    "x": -330.24,
+    "y": 121.2
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-3-1794922972000",
+   "start": {
+    "componentId": "btn10",
+    "pinName": "1.r",
+    "x": -311.24,
+    "y": 120.8
+   },
+   "end": {
+    "componentId": "bb1",
+    "pinName": "5b.f",
+    "x": -311.04,
+    "y": 121.2
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-4-1794922972000",
+   "start": {
+    "componentId": "led10",
+    "pinName": "C",
+    "x": -301.64,
+    "y": 63.6
+   },
+   "end": {
+    "componentId": "bb1",
+    "pinName": "6t.b",
+    "x": -301.44,
+    "y": 63.6
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-5-1794922972000",
+   "start": {
+    "componentId": "led10",
+    "pinName": "A",
+    "x": -291.64,
+    "y": 63.6
+   },
+   "end": {
+    "componentId": "bb1",
+    "pinName": "7t.b",
+    "x": -291.84000000000003,
+    "y": 63.6
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-6-1794922972000",
+   "start": {
+    "componentId": "r10",
+    "pinName": "1",
+    "x": -301.44,
+    "y": 91.79999999999998
+   },
+   "end": {
+    "componentId": "bb1",
+    "pinName": "6t.e",
+    "x": -301.44,
+    "y": 92.39999999999999
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-7-1794922972000",
+   "start": {
+    "componentId": "r10",
+    "pinName": "2",
+    "x": -301.44,
+    "y": 150.6
+   },
+   "end": {
+    "componentId": "bb1",
+    "pinName": "6b.i",
+    "x": -301.44,
+    "y": 150
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-8-1794922972000",
+   "start": {
+    "componentId": "bb1",
+    "pinName": "5b.j",
+    "x": -311.04,
+    "y": 159.6
+   },
+   "end": {
+    "componentId": "bb1",
+    "pinName": "bn.4",
+    "x": -301.4266666666667,
+    "y": 188.4
+   },
+   "color": "#000000"
+  },
+  {
+   "waypoints": [],
+   "id": "wire-9-1794922972000",
+   "start": {
+    "componentId": "bb1",
+    "pinName": "6b.j",
+    "x": -301.44,
+    "y": 159.6
+   },
+   "end": {
+    "componentId": "bb1",
+    "pinName": "bn.5",
+    "x": -291.8266666666667,
+    "y": 188.4
+   },
+   "color": "#000000"
+  },
+  {
+   "waypoints": [],
+   "id": "wire-10-1794922972000",
+   "start": {
+    "componentId": "btn11",
+    "pinName": "2.l",
+    "x": -262.84000000000003,
+    "y": 92.8
+   },
+   "end": {
+    "componentId": "bb1",
+    "pinName": "10t.e",
+    "x": -263.04,
+    "y": 92.39999999999999
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-11-1794922972000",
+   "start": {
+    "componentId": "btn11",
+    "pinName": "1.l",
+    "x": -244.04000000000002,
+    "y": 92.8
+   },
+   "end": {
+    "componentId": "bb1",
+    "pinName": "12t.e",
+    "x": -243.84,
+    "y": 92.39999999999999
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-12-1794922972000",
+   "start": {
+    "componentId": "btn11",
+    "pinName": "2.r",
+    "x": -262.84000000000003,
+    "y": 120.8
+   },
+   "end": {
+    "componentId": "bb1",
+    "pinName": "10b.f",
+    "x": -263.04,
+    "y": 121.2
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-13-1794922972000",
+   "start": {
+    "componentId": "btn11",
+    "pinName": "1.r",
+    "x": -244.04,
+    "y": 120.8
+   },
+   "end": {
+    "componentId": "bb1",
+    "pinName": "12b.f",
+    "x": -243.84,
+    "y": 121.2
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-14-1794922972000",
+   "start": {
+    "componentId": "led11",
+    "pinName": "C",
+    "x": -234.44,
+    "y": 63.6
+   },
+   "end": {
+    "componentId": "bb1",
+    "pinName": "13t.b",
+    "x": -234.24,
+    "y": 63.6
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-15-1794922972000",
+   "start": {
+    "componentId": "led11",
+    "pinName": "A",
+    "x": -224.44,
+    "y": 63.6
+   },
+   "end": {
+    "componentId": "bb1",
+    "pinName": "14t.b",
+    "x": -224.64,
+    "y": 63.6
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-16-1794922972000",
+   "start": {
+    "componentId": "r11",
+    "pinName": "1",
+    "x": -234.24,
+    "y": 91.79999999999998
+   },
+   "end": {
+    "componentId": "bb1",
+    "pinName": "13t.e",
+    "x": -234.24,
+    "y": 92.39999999999999
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-17-1794922972000",
+   "start": {
+    "componentId": "r11",
+    "pinName": "2",
+    "x": -234.24,
+    "y": 150.6
+   },
+   "end": {
+    "componentId": "bb1",
+    "pinName": "13b.i",
+    "x": -234.24,
+    "y": 150
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-18-1794922972000",
+   "start": {
+    "componentId": "bb1",
+    "pinName": "12b.j",
+    "x": -243.84,
+    "y": 159.6
+   },
+   "end": {
+    "componentId": "bb1",
+    "pinName": "bn.10",
+    "x": -234.2266666666667,
+    "y": 188.4
+   },
+   "color": "#000000"
+  },
+  {
+   "waypoints": [],
+   "id": "wire-19-1794922972000",
+   "start": {
+    "componentId": "bb1",
+    "pinName": "13b.j",
+    "x": -234.24,
+    "y": 159.6
+   },
+   "end": {
+    "componentId": "bb1",
+    "pinName": "bn.11",
+    "x": -215.02666666666667,
+    "y": 188.4
+   },
+   "color": "#000000"
+  },
+  {
+   "waypoints": [],
+   "id": "wire-20-1794922972000",
+   "start": {
+    "componentId": "btn12",
+    "pinName": "2.l",
+    "x": -195.64000000000001,
+    "y": 92.8
+   },
+   "end": {
+    "componentId": "bb1",
+    "pinName": "17t.e",
+    "x": -195.84,
+    "y": 92.39999999999999
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-21-1794922972000",
+   "start": {
+    "componentId": "btn12",
+    "pinName": "1.l",
+    "x": -176.84000000000003,
+    "y": 92.8
+   },
+   "end": {
+    "componentId": "bb1",
+    "pinName": "19t.e",
+    "x": -176.64000000000004,
+    "y": 92.39999999999999
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-22-1794922972000",
+   "start": {
+    "componentId": "btn12",
+    "pinName": "2.r",
+    "x": -195.64000000000001,
+    "y": 120.8
+   },
+   "end": {
+    "componentId": "bb1",
+    "pinName": "17b.f",
+    "x": -195.84,
+    "y": 121.2
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-23-1794922972000",
+   "start": {
+    "componentId": "btn12",
+    "pinName": "1.r",
+    "x": -176.84000000000003,
+    "y": 120.8
+   },
+   "end": {
+    "componentId": "bb1",
+    "pinName": "19b.f",
+    "x": -176.64000000000004,
+    "y": 121.2
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-24-1794922972000",
+   "start": {
+    "componentId": "led12",
+    "pinName": "C",
+    "x": -167.24,
+    "y": 63.6
+   },
+   "end": {
+    "componentId": "bb1",
+    "pinName": "20t.b",
+    "x": -167.04000000000002,
+    "y": 63.6
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-25-1794922972000",
+   "start": {
+    "componentId": "led12",
+    "pinName": "A",
+    "x": -157.24,
+    "y": 63.6
+   },
+   "end": {
+    "componentId": "bb1",
+    "pinName": "21t.b",
+    "x": -157.44000000000003,
+    "y": 63.6
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-26-1794922972000",
+   "start": {
+    "componentId": "r12",
+    "pinName": "1",
+    "x": -167.04000000000002,
+    "y": 91.80000000000001
+   },
+   "end": {
+    "componentId": "bb1",
+    "pinName": "20t.e",
+    "x": -167.04000000000002,
+    "y": 92.39999999999999
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-27-1794922972000",
+   "start": {
+    "componentId": "r12",
+    "pinName": "2",
+    "x": -167.04000000000002,
+    "y": 150.6
+   },
+   "end": {
+    "componentId": "bb1",
+    "pinName": "20b.i",
+    "x": -167.04000000000002,
+    "y": 150
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-28-1794922972000",
+   "start": {
+    "componentId": "bb1",
+    "pinName": "19b.j",
+    "x": -176.64000000000004,
+    "y": 159.6
+   },
+   "end": {
+    "componentId": "bb1",
+    "pinName": "bn.16",
+    "x": -157.42666666666668,
+    "y": 188.4
+   },
+   "color": "#000000"
+  },
+  {
+   "waypoints": [],
+   "id": "wire-29-1794922972000",
+   "start": {
+    "componentId": "bb1",
+    "pinName": "20b.j",
+    "x": -167.04000000000002,
+    "y": 159.6
+   },
+   "end": {
+    "componentId": "bb1",
+    "pinName": "bn.17",
+    "x": -147.82666666666668,
+    "y": 188.4
+   },
+   "color": "#000000"
+  },
+  {
+   "waypoints": [],
+   "id": "wire-40-1794922972000",
+   "start": {
+    "componentId": "bb1",
+    "pinName": "3b.j",
+    "x": -330.24,
+    "y": 159.6
+   },
+   "end": {
+    "componentId": "esp32-devkit-c-v4",
+    "pinName": "13",
+    "x": -294,
+    "y": 506
+   },
+   "color": "#ff0000"
+  },
+  {
+   "waypoints": [],
+   "id": "wire-41-1794922972000",
+   "start": {
+    "componentId": "bb1",
+    "pinName": "bn.3",
+    "x": -311.02666666666664,
+    "y": 188.4
+   },
+   "end": {
+    "componentId": "esp32-devkit-c-v4",
+    "pinName": "GND.1",
+    "x": -294,
+    "y": 493
+   },
+   "color": "#000000"
+  },
+  {
+   "waypoints": [],
+   "id": "wire-42-1794922972000",
+   "start": {
+    "componentId": "bb1",
+    "pinName": "7t.e",
+    "x": -291.84000000000003,
+    "y": 92.39999999999999
+   },
+   "end": {
+    "componentId": "esp32-devkit-c-v4",
+    "pinName": "12",
+    "x": -294,
+    "y": 481
+   },
+   "color": "#ff0000"
+  },
+  {
+   "waypoints": [],
+   "id": "wire-43-1794922972000",
+   "start": {
+    "componentId": "bb1",
+    "pinName": "10b.j",
+    "x": -263.04,
+    "y": 159.6
+   },
+   "end": {
+    "componentId": "esp32-devkit-c-v4",
+    "pinName": "14",
+    "x": -294,
+    "y": 468
+   },
+   "color": "#00c800"
+  },
+  {
+   "waypoints": [],
+   "id": "wire-44-1794922972000",
+   "start": {
+    "componentId": "bb1",
+    "pinName": "14t.e",
+    "x": -224.64,
+    "y": 92.39999999999999
+   },
+   "end": {
+    "componentId": "esp32-devkit-c-v4",
+    "pinName": "27",
+    "x": -294,
+    "y": 455
+   },
+   "color": "#00c800"
+  },
+  {
+   "waypoints": [],
+   "id": "wire-45-1794922972000",
+   "start": {
+    "componentId": "bb1",
+    "pinName": "17b.j",
+    "x": -195.84,
+    "y": 159.6
+   },
+   "end": {
+    "componentId": "esp32-devkit-c-v4",
+    "pinName": "26",
+    "x": -294,
+    "y": 442
+   },
+   "color": "#ffd700"
+  },
+  {
+   "waypoints": [],
+   "id": "wire-46-1794922972000",
+   "start": {
+    "componentId": "bb1",
+    "pinName": "21t.e",
+    "x": -157.44000000000003,
+    "y": 92.39999999999999
+   },
+   "end": {
+    "componentId": "esp32-devkit-c-v4",
+    "pinName": "25",
+    "x": -294,
+    "y": 430
+   },
+   "color": "#ffd700"
+  },
+  {
+   "waypoints": [],
+   "id": "wire-49-1794922972000",
+   "start": {
+    "componentId": "lcd1",
+    "pinName": "VCC",
+    "x": -24.19999999999999,
+    "y": 354.3
+   },
+   "end": {
+    "componentId": "esp32-devkit-c-v4",
+    "pinName": "3V3",
+    "x": -294,
+    "y": 328
+   },
+   "color": "#ff0000"
+  },
+  {
+   "waypoints": [],
+   "id": "wire-50-1794922972000",
+   "start": {
+    "componentId": "lcd1",
+    "pinName": "GND",
+    "x": -24.19999999999999,
+    "y": 363.9012
+   },
+   "end": {
+    "componentId": "esp32-devkit-c-v4",
+    "pinName": "GND.2",
+    "x": -167,
+    "y": 328
+   },
+   "color": "#000000"
+  },
+  {
+   "waypoints": [],
+   "id": "wire-51-1794922972000",
+   "start": {
+    "componentId": "lcd1",
+    "pinName": "CS",
+    "x": -24.19999999999999,
+    "y": 373.50239999999997
+   },
+   "end": {
+    "componentId": "esp32-devkit-c-v4",
+    "pinName": "5",
+    "x": -167,
+    "y": 442
+   },
+   "color": "#00c800"
+  },
+  {
+   "waypoints": [],
+   "id": "wire-52-1794922972000",
+   "start": {
+    "componentId": "lcd1",
+    "pinName": "RST",
+    "x": -24.19999999999999,
+    "y": 383.10360000000003
+   },
+   "end": {
+    "componentId": "esp32-devkit-c-v4",
+    "pinName": "4",
+    "x": -167,
+    "y": 481
+   },
+   "color": "#ffd700"
+  },
+  {
+   "waypoints": [],
+   "id": "wire-53-1794922972000",
+   "start": {
+    "componentId": "lcd1",
+    "pinName": "D/C",
+    "x": -24.19999999999999,
+    "y": 392.7048
+   },
+   "end": {
+    "componentId": "esp32-devkit-c-v4",
+    "pinName": "2",
+    "x": -167,
+    "y": 506
+   },
+   "color": "#0000ff"
+  },
+  {
+   "waypoints": [],
+   "id": "wire-54-1794922972000",
+   "start": {
+    "componentId": "lcd1",
+    "pinName": "MOSI",
+    "x": -24.19999999999999,
+    "y": 402.306
+   },
+   "end": {
+    "componentId": "esp32-devkit-c-v4",
+    "pinName": "23",
+    "x": -167,
+    "y": 341
+   },
+   "color": "#ff8800"
+  },
+  {
+   "waypoints": [],
+   "id": "wire-55-1794922972000",
+   "start": {
+    "componentId": "lcd1",
+    "pinName": "SCK",
+    "x": -24.19999999999999,
+    "y": 411.9072
+   },
+   "end": {
+    "componentId": "esp32-devkit-c-v4",
+    "pinName": "18",
+    "x": -167,
+    "y": 430
+   },
+   "color": "#800080"
+  },
+  {
+   "waypoints": [],
+   "id": "wire-56-1794922972000",
+   "start": {
+    "componentId": "lcd1",
+    "pinName": "LED",
+    "x": -24.19999999999999,
+    "y": 421.5084
+   },
+   "end": {
+    "componentId": "esp32-devkit-c-v4",
+    "pinName": "3V3",
+    "x": -294,
+    "y": 328
+   },
+   "color": "#ff0000"
+  },
+  {
+   "waypoints": [],
+   "id": "wire-57-1794922972000",
+   "start": {
+    "componentId": "lcd1",
+    "pinName": "MISO",
+    "x": -24.19999999999999,
+    "y": 431.1096
+   },
+   "end": {
+    "componentId": "esp32-devkit-c-v4",
+    "pinName": "19",
+    "x": -167,
+    "y": 417
+   },
+   "color": "#808080"
+  },
+  {
+   "waypoints": [],
+   "id": "wire-0-1794922985938-c2",
+   "start": {
+    "componentId": "btn20",
+    "pinName": "2.l",
+    "x": 409.15999999999997,
+    "y": 92.8
+   },
+   "end": {
+    "componentId": "bb2",
+    "pinName": "5t.e",
+    "x": 408.96,
+    "y": 92.39999999999999
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-1-1794922985938-c2",
+   "start": {
+    "componentId": "btn20",
+    "pinName": "1.l",
+    "x": 427.96,
+    "y": 92.8
+   },
+   "end": {
+    "componentId": "bb2",
+    "pinName": "7t.e",
+    "x": 428.15999999999997,
+    "y": 92.39999999999999
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-2-1794922985938-c2",
+   "start": {
+    "componentId": "btn20",
+    "pinName": "2.r",
+    "x": 409.15999999999997,
+    "y": 120.8
+   },
+   "end": {
+    "componentId": "bb2",
+    "pinName": "5b.f",
+    "x": 408.96,
+    "y": 121.2
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-3-1794922985938-c2",
+   "start": {
+    "componentId": "btn20",
+    "pinName": "1.r",
+    "x": 427.96,
+    "y": 120.8
+   },
+   "end": {
+    "componentId": "bb2",
+    "pinName": "7b.f",
+    "x": 428.15999999999997,
+    "y": 121.2
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-4-1794922985938-c2",
+   "start": {
+    "componentId": "led20",
+    "pinName": "C",
+    "x": 389.56,
+    "y": 63.6
+   },
+   "end": {
+    "componentId": "bb2",
+    "pinName": "3t.b",
+    "x": 389.76,
+    "y": 63.6
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-5-1794922985938-c2",
+   "start": {
+    "componentId": "led20",
+    "pinName": "A",
+    "x": 399.56,
+    "y": 63.6
+   },
+   "end": {
+    "componentId": "bb2",
+    "pinName": "4t.b",
+    "x": 399.36,
+    "y": 63.6
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-6-1794922985938-c2",
+   "start": {
+    "componentId": "r20",
+    "pinName": "1",
+    "x": 389.76,
+    "y": 91.79999999999998
+   },
+   "end": {
+    "componentId": "bb2",
+    "pinName": "3t.e",
+    "x": 389.76,
+    "y": 92.39999999999999
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-7-1794922985938-c2",
+   "start": {
+    "componentId": "r20",
+    "pinName": "2",
+    "x": 389.76,
+    "y": 150.6
+   },
+   "end": {
+    "componentId": "bb2",
+    "pinName": "3b.i",
+    "x": 389.76,
+    "y": 150
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-8-1794922985938-c2",
+   "start": {
+    "componentId": "bb2",
+    "pinName": "5b.j",
+    "x": 408.96,
+    "y": 159.6
+   },
+   "end": {
+    "componentId": "bb2",
+    "pinName": "bn.4",
+    "x": 418.5733333333333,
+    "y": 188.4
+   },
+   "color": "#000000"
+  },
+  {
+   "waypoints": [],
+   "id": "wire-9-1794922985938-c2",
+   "start": {
+    "componentId": "bb2",
+    "pinName": "3b.j",
+    "x": 389.76,
+    "y": 159.6
+   },
+   "end": {
+    "componentId": "bb2",
+    "pinName": "bn.2",
+    "x": 399.37333333333333,
+    "y": 188.4
+   },
+   "color": "#000000"
+  },
+  {
+   "waypoints": [],
+   "id": "wire-10-1794922985938-c2",
+   "start": {
+    "componentId": "btn21",
+    "pinName": "2.l",
+    "x": 476.36,
+    "y": 92.8
+   },
+   "end": {
+    "componentId": "bb2",
+    "pinName": "12t.e",
+    "x": 476.15999999999997,
+    "y": 92.39999999999999
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-11-1794922985938-c2",
+   "start": {
+    "componentId": "btn21",
+    "pinName": "1.l",
+    "x": 495.15999999999997,
+    "y": 92.8
+   },
+   "end": {
+    "componentId": "bb2",
+    "pinName": "14t.e",
+    "x": 495.36,
+    "y": 92.39999999999999
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-12-1794922985938-c2",
+   "start": {
+    "componentId": "btn21",
+    "pinName": "2.r",
+    "x": 476.36,
+    "y": 120.8
+   },
+   "end": {
+    "componentId": "bb2",
+    "pinName": "12b.f",
+    "x": 476.15999999999997,
+    "y": 121.2
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-13-1794922985938-c2",
+   "start": {
+    "componentId": "btn21",
+    "pinName": "1.r",
+    "x": 495.15999999999997,
+    "y": 120.8
+   },
+   "end": {
+    "componentId": "bb2",
+    "pinName": "14b.f",
+    "x": 495.36,
+    "y": 121.2
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-14-1794922985938-c2",
+   "start": {
+    "componentId": "led21",
+    "pinName": "C",
+    "x": 456.76,
+    "y": 63.6
+   },
+   "end": {
+    "componentId": "bb2",
+    "pinName": "10t.b",
+    "x": 456.96,
+    "y": 63.6
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-15-1794922985938-c2",
+   "start": {
+    "componentId": "led21",
+    "pinName": "A",
+    "x": 466.76,
+    "y": 63.6
+   },
+   "end": {
+    "componentId": "bb2",
+    "pinName": "11t.b",
+    "x": 466.56,
+    "y": 63.6
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-16-1794922985938-c2",
+   "start": {
+    "componentId": "r21",
+    "pinName": "1",
+    "x": 456.96,
+    "y": 91.79999999999998
+   },
+   "end": {
+    "componentId": "bb2",
+    "pinName": "10t.e",
+    "x": 456.96,
+    "y": 92.39999999999999
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-17-1794922985938-c2",
+   "start": {
+    "componentId": "r21",
+    "pinName": "2",
+    "x": 456.96,
+    "y": 150.6
+   },
+   "end": {
+    "componentId": "bb2",
+    "pinName": "10b.i",
+    "x": 456.96,
+    "y": 150
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-18-1794922985938-c2",
+   "start": {
+    "componentId": "bb2",
+    "pinName": "12b.j",
+    "x": 476.15999999999997,
+    "y": 159.6
+   },
+   "end": {
+    "componentId": "bb2",
+    "pinName": "bn.10",
+    "x": 485.7733333333333,
+    "y": 188.4
+   },
+   "color": "#000000"
+  },
+  {
+   "waypoints": [],
+   "id": "wire-19-1794922985938-c2",
+   "start": {
+    "componentId": "bb2",
+    "pinName": "10b.j",
+    "x": 456.96,
+    "y": 159.6
+   },
+   "end": {
+    "componentId": "bb2",
+    "pinName": "bn.8",
+    "x": 466.5733333333333,
+    "y": 188.4
+   },
+   "color": "#000000"
+  },
+  {
+   "waypoints": [],
+   "id": "wire-20-1794922985938-c2",
+   "start": {
+    "componentId": "btn22",
+    "pinName": "2.l",
+    "x": 543.56,
+    "y": 92.8
+   },
+   "end": {
+    "componentId": "bb2",
+    "pinName": "19t.e",
+    "x": 543.3599999999999,
+    "y": 92.39999999999999
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-21-1794922985938-c2",
+   "start": {
+    "componentId": "btn22",
+    "pinName": "1.l",
+    "x": 562.36,
+    "y": 92.8
+   },
+   "end": {
+    "componentId": "bb2",
+    "pinName": "21t.e",
+    "x": 562.56,
+    "y": 92.39999999999999
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-22-1794922985938-c2",
+   "start": {
+    "componentId": "btn22",
+    "pinName": "2.r",
+    "x": 543.56,
+    "y": 120.8
+   },
+   "end": {
+    "componentId": "bb2",
+    "pinName": "19b.f",
+    "x": 543.3599999999999,
+    "y": 121.2
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-23-1794922985938-c2",
+   "start": {
+    "componentId": "btn22",
+    "pinName": "1.r",
+    "x": 562.36,
+    "y": 120.8
+   },
+   "end": {
+    "componentId": "bb2",
+    "pinName": "21b.f",
+    "x": 562.56,
+    "y": 121.2
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-24-1794922985938-c2",
+   "start": {
+    "componentId": "led22",
+    "pinName": "C",
+    "x": 523.96,
+    "y": 63.6
+   },
+   "end": {
+    "componentId": "bb2",
+    "pinName": "17t.b",
+    "x": 524.16,
+    "y": 63.6
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-25-1794922985938-c2",
+   "start": {
+    "componentId": "led22",
+    "pinName": "A",
+    "x": 533.96,
+    "y": 63.6
+   },
+   "end": {
+    "componentId": "bb2",
+    "pinName": "18t.b",
+    "x": 533.76,
+    "y": 63.6
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-26-1794922985938-c2",
+   "start": {
+    "componentId": "r22",
+    "pinName": "1",
+    "x": 524.16,
+    "y": 91.79999999999998
+   },
+   "end": {
+    "componentId": "bb2",
+    "pinName": "17t.e",
+    "x": 524.16,
+    "y": 92.39999999999999
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-27-1794922985938-c2",
+   "start": {
+    "componentId": "r22",
+    "pinName": "2",
+    "x": 524.16,
+    "y": 150.6
+   },
+   "end": {
+    "componentId": "bb2",
+    "pinName": "17b.i",
+    "x": 524.16,
+    "y": 150
+   },
+   "color": "#000000",
+   "bb": true
+  },
+  {
+   "waypoints": [],
+   "id": "wire-28-1794922985938-c2",
+   "start": {
+    "componentId": "bb2",
+    "pinName": "19b.j",
+    "x": 543.3599999999999,
+    "y": 159.6
+   },
+   "end": {
+    "componentId": "bb2",
+    "pinName": "bn.16",
+    "x": 562.5733333333333,
+    "y": 188.4
+   },
+   "color": "#000000"
+  },
+  {
+   "waypoints": [],
+   "id": "wire-29-1794922985938-c2",
+   "start": {
+    "componentId": "bb2",
+    "pinName": "17b.j",
+    "x": 524.16,
+    "y": 159.6
+   },
+   "end": {
+    "componentId": "bb2",
+    "pinName": "bn.14",
+    "x": 533.7733333333333,
+    "y": 188.4
+   },
+   "color": "#000000"
+  },
+  {
+   "waypoints": [],
+   "id": "wire-42-1794922985938-c2",
+   "start": {
+    "componentId": "bb2",
+    "pinName": "21b.j",
+    "x": 562.56,
+    "y": 159.6
+   },
+   "end": {
+    "componentId": "esp32-devkit-c-v4-2",
+    "pinName": "4",
+    "x": 563,
+    "y": 481
+   },
+   "color": "#ffd700"
+  },
+  {
+   "waypoints": [],
+   "id": "wire-43-1794922985938-c2",
+   "start": {
+    "componentId": "bb2",
+    "pinName": "18t.e",
+    "x": 533.76,
+    "y": 92.39999999999999
+   },
+   "end": {
+    "componentId": "esp32-devkit-c-v4-2",
+    "pinName": "16",
+    "x": 563,
+    "y": 468
+   },
+   "color": "#ffd700"
+  },
+  {
+   "waypoints": [],
+   "id": "wire-44-1794922985938-c2",
+   "start": {
+    "componentId": "bb2",
+    "pinName": "14b.j",
+    "x": 495.36,
+    "y": 159.6
+   },
+   "end": {
+    "componentId": "esp32-devkit-c-v4-2",
+    "pinName": "5",
+    "x": 563,
+    "y": 442
+   },
+   "color": "#00c800"
+  },
+  {
+   "waypoints": [],
+   "id": "wire-45-1794922985938-c2",
+   "start": {
+    "componentId": "bb2",
+    "pinName": "11t.e",
+    "x": 466.56,
+    "y": 92.39999999999999
+   },
+   "end": {
+    "componentId": "esp32-devkit-c-v4-2",
+    "pinName": "17",
+    "x": 563,
+    "y": 455
+   },
+   "color": "#00c800"
+  },
+  {
+   "waypoints": [],
+   "id": "wire-46-1794922985938-c2",
+   "start": {
+    "componentId": "bb2",
+    "pinName": "7b.j",
+    "x": 428.15999999999997,
+    "y": 159.6
+   },
+   "end": {
+    "componentId": "esp32-devkit-c-v4-2",
+    "pinName": "18",
+    "x": 563,
+    "y": 430
+   },
+   "color": "#ff0000"
+  },
+  {
+   "waypoints": [],
+   "id": "wire-47-1794922985938-c2",
+   "start": {
+    "componentId": "bb2",
+    "pinName": "4t.e",
+    "x": 399.36,
+    "y": 92.39999999999999
+   },
+   "end": {
+    "componentId": "esp32-devkit-c-v4-2",
+    "pinName": "19",
+    "x": 563,
+    "y": 417
+   },
+   "color": "#ff0000"
+  },
+  {
+   "waypoints": [],
+   "id": "wire-48-1794922985938-c2",
+   "start": {
+    "componentId": "bb2",
+    "pinName": "bn.1",
+    "x": 389.7733333333333,
+    "y": 188.4
+   },
+   "end": {
+    "componentId": "esp32-devkit-c-v4-2",
+    "pinName": "GND.3",
+    "x": 563,
+    "y": 404
+   },
+   "color": "#000000"
+  }
+ ],
+ "activeBoardId": "esp32-devkit-c-v4"
+}
