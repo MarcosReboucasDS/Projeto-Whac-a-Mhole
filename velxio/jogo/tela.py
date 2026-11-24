@@ -122,7 +122,7 @@ def desenhar_campo():
             display.preencher(88 + index * 80, y + 8, 48, 10, CORES_BOTOES[index])
             buracos_desenhados[jogador][index] = None
 
-def atualizar_display(mensagem, pontos, toupeira, esmagada, esmagou):
+def atualizar_display(mensagem, pontos, toupeira, esmagados):
     if not campo_desenhado:
         desenhar_campo()
     desenhar_titulo(mensagem)
@@ -135,10 +135,10 @@ def atualizar_display(mensagem, pontos, toupeira, esmagada, esmagou):
 
         for index in range(3):
             tipo = VAZIO
-            if index == toupeira:
-                tipo = TOUPEIRA
-            elif index == esmagada and esmagou == jogador + 1:
+            if index == esmagados[jogador]:
                 tipo = ESMAGADA
+            elif index == toupeira:
+                tipo = TOUPEIRA
             desenhar_buraco(jogador, index, tipo)
 
 # contagem antes do jogo começar

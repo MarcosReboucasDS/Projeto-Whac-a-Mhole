@@ -11,6 +11,8 @@ O projeto usa três ESP32:
 
 Os controles não calculam pontuação e não dependem um do outro. O ESP32 do jogo sorteia a toupeira, recebe as jogadas dos dois jogadores, valida os acertos, atualiza o placar e transmite o LED ativo para os dois controles. Assim, nenhum jogador fica responsável por executar parte da lógica do adversário.
 
+Cada jogador pode pontuar uma vez por toupeira. Depois que um jogador acerta, a toupeira permanece ativa para que o outro também possa acertar. A rodada termina quando os dois jogadores acertam ou quando o tempo da toupeira acaba.
+
 ## Comunicação
 
 O protocolo usa mensagens curtas e identificadas:
