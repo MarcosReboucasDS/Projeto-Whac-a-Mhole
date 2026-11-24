@@ -1,25 +1,21 @@
 import network
 import time
 
-# True no Velxio (WiFi + MQTT), False nas placas de verdade (ESP-NOW)
 SIMULADOR = False
-
-# nome que separa o nosso jogo dos outros no servidor MQTT
 SALA = b"whac-a-mole-7f3k9q"
-# endereço do ESP-NOW que fala com qualquer placa por perto
 TODOS = bytes([255] * 6)
 
 conexao = None
-topico = None
+topico_estado = None
 recebidas = []
 
-# o MQTT chama esta função quando chega uma mensagem
+
 def chegou(origem, mensagem):
     recebidas.append(bytes(mensagem))
 
-# envia e recebe são os assuntos de cada controle: led ou botao
-def conectar(envia, recebe):
-    global conexao, topico
+
+def conectar(jogador):
+    global conexao, topico_estado
 
     wifi = network.WLAN(network.STA_IF)
     wifi.active(True)
@@ -31,12 +27,13 @@ def conectar(envia, recebe):
         while not wifi.isconnected():
             time.sleep_ms(200)
 
-        topico = SALA + b"/" + envia
-        conexao = MQTTClient(SALA + b"-" + envia, "broker.hivemq.com")
+        prefixo = SALA + b"/"
+        topico_estado = prefixo + b"estado"
+        conexao = MQTTClient(SALA + b"-jogador" + bytes([48 + jogador]), "broker.hivemq.com")
         conexao.set_callback(chegou)
         conexao.connect()
         conexao.sock.setsockopt(6, 1, 1)
-        conexao.subscribe(SALA + b"/" + recebe)
+        conexao.subscribe(topico_estado)
     else:
         import espnow
 
@@ -44,17 +41,18 @@ def conectar(envia, recebe):
         conexao.active(True)
         conexao.add_peer(TODOS)
 
-# manda um número só: o LED aceso ou o botão apertado
-def enviar(numero):
+
+def enviar_botao(jogador, index):
+    pacote = bytes([0x10, jogador, index])
     try:
         if SIMULADOR:
-            conexao.publish(topico, bytes([numero]))
+            conexao.publish(SALA + b"/jogador" + bytes([48 + jogador]) + b"/botao", pacote)
         else:
-            conexao.send(TODOS, bytes([numero]), False)
+            conexao.send(TODOS, pacote, False)
     except OSError:
         pass
 
-# devolve o número que chegou, ou None se não chegou nada
+
 def receber():
     try:
         if SIMULADOR:
@@ -62,10 +60,12 @@ def receber():
         else:
             origem, mensagem = conexao.recv(0)
             if mensagem:
-                recebidas.append(mensagem)
+                recebidas.append(bytes(mensagem))
     except OSError:
         pass
 
     if recebidas:
-        return recebidas.pop(0)[0]
+        mensagem = recebidas.pop(0)
+        if len(mensagem) >= 2 and mensagem[0] == 0x20:
+            return mensagem[1]
     return None

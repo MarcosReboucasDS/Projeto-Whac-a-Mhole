@@ -2,15 +2,18 @@ from machine import Pin
 import radio
 import time
 
+JOGADOR = 2
 leds = [Pin(19, Pin.OUT), Pin(17, Pin.OUT), Pin(16, Pin.OUT)]
 buttons = [Pin(18, Pin.IN, Pin.PULL_UP), Pin(5, Pin.IN, Pin.PULL_UP), Pin(4, Pin.IN, Pin.PULL_UP)]
 
 botao_apertado = -1
 ultimo_clique = 0
 
+
 def acender_led(index):
     for posicao, led in enumerate(leds):
         led.value(1 if posicao == index else 0)
+
 
 def trata_botao(pin):
     global botao_apertado, ultimo_clique
@@ -24,16 +27,16 @@ def trata_botao(pin):
             botao_apertado = index
             return
 
+
 for btn in buttons:
     btn.irq(trigger=Pin.IRQ_FALLING, handler=trata_botao)
 
-acender_led(-1)
-radio.conectar(b"botao", b"led")
+acender_led(255)
+radio.conectar(JOGADOR)
 
-# o controle 2 só manda o botão apertado e acende o LED que o controle 1 pedir
 while True:
     if botao_apertado >= 0:
-        radio.enviar(botao_apertado)
+        radio.enviar_botao(JOGADOR, botao_apertado)
         botao_apertado = -1
 
     index = radio.receber()

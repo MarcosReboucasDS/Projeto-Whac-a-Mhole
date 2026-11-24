@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "author": "Controlador central do jogo",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "board-esp32-devkit-c-v4",
+      "id": "esp",
+      "top": 290,
+      "left": 0,
+      "attrs": {
+        "env": "micropython-20231005-v1.21.0"
+      }
+    },
+    {
+      "type": "wokwi-ili9341",
+      "id": "lcd1",
+      "top": -40,
+      "left": 240,
+      "rotate": 90,
+      "attrs": {}
+    }
+  ],
+  "connections": [
+    [
+      "esp:TX",
+      "$serialMonitor:RX",
+      "",
+      []
+    ],
+    [
+      "esp:RX",
+      "$serialMonitor:TX",
+      "",
+      []
+    ],
+    [
+      "lcd1:VCC",
+      "esp:3V3",
+      "red",
+      []
+    ],
+    [
+      "lcd1:GND",
+      "esp:GND.2",
+      "black",
+      []
+    ],
+    [
+      "lcd1:CS",
+      "esp:5",
+      "green",
+      []
+    ],
+    [
+      "lcd1:RST",
+      "esp:4",
+      "gold",
+      []
+    ],
+    [
+      "lcd1:D/C",
+      "esp:2",
+      "blue",
+      []
+    ],
+    [
+      "lcd1:MOSI",
+      "esp:23",
+      "orange",
+      []
+    ],
+    [
+      "lcd1:SCK",
+      "esp:18",
+      "purple",
+      []
+    ],
+    [
+      "lcd1:LED",
+      "esp:3V3",
+      "red",
+      []
+    ],
+    [
+      "lcd1:MISO",
+      "esp:19",
+      "gray",
+      []
+    ]
+  ]
+}
