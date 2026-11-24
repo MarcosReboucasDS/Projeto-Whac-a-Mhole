@@ -22,7 +22,7 @@ acertou = 0
 esmagou = 0
 apertou = False
 
-def atualizar_display(mensagem="ESMAGA RATA!"):
+def atualizar_display(mensagem="ESMAGA!"):
     tela.atualizar_display(mensagem, pontos, led_aceso, led_atual, esmagou)
 
 def acender_leds(index):
@@ -112,7 +112,7 @@ def jogar():
         esperar(max(800, 1500 - max(pontos) * 80))
 
         apagar_leds()
-        atualizar_display("J{} ACERTOU!".format(esmagou) if esmagou else "ESMAGA RATA!")
+        atualizar_display("J{} ACERTOU!".format(esmagou) if esmagou else "ESMAGA!")
 
         esperar(max(500, 800 - max(pontos) * 30))
 
